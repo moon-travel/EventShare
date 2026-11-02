@@ -7,6 +7,7 @@ import { createDb } from "~/.server/db";
 import { findDuplicateCandidates } from "~/.server/duplicates/find";
 import { draftToFormValues, eventToFormValues, parseEventForm, resolveEventImage, type EventFormValues } from "~/.server/services/event-form";
 import { addInfoToEvent, createEvent, getActiveCategories, getEvent, getEventCategoryIds } from "~/.server/services/events";
+import { assertTagUpdate, saveEventTags, TagLimitError } from "~/.server/services/tags";
 import { notifyNewEvent } from "~/.server/services/notifications";
 import { attachToSeries, findSeriesCandidates, getSeriesDetail, notifyNewEdition, pickLatestEdition } from "~/.server/services/series";
 import { enforceRateLimit } from "~/.server/rate-limit";
@@ -136,12 +137,31 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!target || target.status !== "published") {
       return data({ errors: { _form: "追加先のイベントが見つかりません" }, values: parsed.values }, { status: 400 });
     }
+    if (input.tags.length > 0) {
+      try {
+        await assertTagUpdate(db, { eventId: target.id, names: input.tags, mode: "add" });
+      } catch (error) {
+        if (error instanceof TagLimitError) {
+          return data({ errors: { tags: error.message }, values: parsed.values }, { status: 400 });
+        }
+        throw error;
+      }
+    }
     const image = await resolveEventImage(db, form, user.id, input);
     await addInfoToEvent(db, target, input, user.id, {
       imageMediaId: image.mediaId ?? null,
       note: "重複候補から情報を追加",
       timeZone,
     });
+    if (input.tags.length > 0) {
+      await saveEventTags(db, {
+        eventId: target.id,
+        names: input.tags,
+        userId: user.id,
+        mode: "add",
+        contributionType: "add_info",
+      });
+    }
     throw redirect(`/events/${target.id}?contributed=1`);
   }
 
@@ -160,6 +180,15 @@ export async function action({ request, context }: Route.ActionArgs) {
     return data({ errors: { image: image.error }, values: parsed.values }, { status: 400 });
   }
   const id = await createEvent(db, input, user.id, image.mediaId ?? null, timeZone);
+  if (input.tags.length > 0) {
+    await saveEventTags(db, {
+      eventId: id,
+      names: input.tags,
+      userId: user.id,
+      mode: "replace",
+      contributionType: null,
+    });
+  }
   const created = await getEvent(db, id);
   let linked = false;
   if (created?.seriesId && created.seriesId !== (input.seriesId || null)) {
