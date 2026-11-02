@@ -1,4 +1,5 @@
 import { ImageIcon } from "lucide-react";
+import { TagInput } from "~/components/events/tag-input";
 import { FormField } from "~/components/form-field";
 import { Badge } from "~/components/ui/badge";
 import { Checkbox } from "~/components/ui/checkbox";
@@ -32,6 +33,8 @@ type Props = {
   dateHint?: string;
   /** Fields that cannot be changed (add-info mode: already filled). */
   locked?: string[];
+  /** Tag names that can be shown but not removed (add-info). */
+  lockedTags?: string[];
   imagePreviewUrl?: string | null;
   allowRemoveImage?: boolean;
 };
@@ -47,6 +50,7 @@ export function EventForm({
   sources = {},
   dateHint,
   locked = [],
+  lockedTags = [],
   imagePreviewUrl,
   allowRemoveImage,
 }: Props) {
@@ -112,6 +116,21 @@ export function EventForm({
           </div>
           {errors.categoryIds && <p className="text-xs font-medium text-destructive">{errors.categoryIds}</p>}
         </fieldset>
+
+        <FormField id="ev-tags" label="タグ" error={errors.tags} hint="最大8個、1〜20文字">
+          <TagInput
+            id="ev-tags"
+            defaultTags={
+              Array.isArray(values.tags)
+                ? values.tags.filter((tag): tag is string => typeof tag === "string")
+                : typeof values.tags === "string" && values.tags
+                  ? [values.tags]
+                  : []
+            }
+            lockedTags={lockedTags}
+            error={errors.tags}
+          />
+        </FormField>
 
         <FormField
           id="ev-description"
