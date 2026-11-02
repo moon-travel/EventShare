@@ -97,6 +97,11 @@ export function EventCard({
               {FEE_LABEL.free}
             </Badge>
           )}
+          {event.editionLabel && (
+            <Badge variant="outline" className="font-normal">
+              {event.editionLabel}
+            </Badge>
+          )}
         </div>
         <h3 className="line-clamp-2 text-base leading-snug font-semibold group-hover:text-primary">
           {event.title}
