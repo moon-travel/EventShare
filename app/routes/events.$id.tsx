@@ -22,6 +22,7 @@ import { createDb } from "~/.server/db";
 import { listActivities } from "~/.server/services/activities";
 import { getEventExtras } from "~/.server/services/event-detail";
 import { getEvent, mediaUrl } from "~/.server/services/events";
+import { getEventTags } from "~/.server/services/tags";
 import {
   addComment,
   editComment,
@@ -94,12 +95,13 @@ export async function loader({ params, context }: Route.LoaderArgs) {
 
   const { timeZone } = getConfig();
   const viewerRef = viewer ? { id: viewer.id, admin: isAdmin(viewer) } : null;
-  const [extras, comments, viewerState, activities, creator, series] = await Promise.all([
+  const [extras, comments, viewerState, activities, creator, eventTagRows, series] = await Promise.all([
     getEventExtras(db, event.id),
     listComments(db, event.id),
     getViewerState(db, viewer?.id, event.id),
     listActivities(db, { eventId: event.id, limit: 6 }),
     event.createdById ? getUserById(db, event.createdById) : null,
+    getEventTags(db, event.id),
     getEventSeriesContext(db, event, viewerRef, timeZone),
   ]);
 
@@ -113,6 +115,9 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     comments,
     viewerState,
     activities,
+    tags: eventTagRows
+      .filter((tag) => tag.status === "active")
+      .map(({ name, slug }) => ({ name, slug })),
     canEdit: owner || admin,
     fieldLabels: EVENT_FIELD_LABEL,
   };
@@ -454,6 +459,7 @@ export default function EventDetail({ loaderData }: Route.ComponentProps) {
     comments,
     viewerState,
     activities,
+    tags,
     canEdit,
     fieldLabels,
   } = loaderData;
@@ -519,6 +525,13 @@ export default function EventDetail({ loaderData }: Route.ComponentProps) {
               <Link key={c.id} to={`/events?category=${c.slug}`}>
                 <Badge variant="secondary" className="hover:bg-accent">
                   {c.name}
+                </Badge>
+              </Link>
+            ))}
+            {tags.map((tag) => (
+              <Link key={tag.slug} to={`/tags/${encodeURIComponent(tag.slug)}`}>
+                <Badge variant="outline" className="font-normal hover:bg-accent">
+                  {tag.name}
                 </Badge>
               </Link>
             ))}

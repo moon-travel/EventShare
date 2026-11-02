@@ -12,6 +12,7 @@ import {
   mediaUrl,
   updateEvent,
 } from "~/.server/services/events";
+import { assertTagUpdate, getEventTags, saveEventTags, TagLimitError } from "~/.server/services/tags";
 import { eventContributions } from "~/.server/db/schema";
 import {
   attachToSeries,
@@ -57,11 +58,15 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
     admin: isAdmin(user),
     editionCount: detail?.editionCount ?? 0,
   });
-  const [categories, categoryIds] = await Promise.all([
+  const [categories, categoryIds, tagRows] = await Promise.all([
     getActiveCategories(db),
     getEventCategoryIds(db, event.id),
+    getEventTags(db, event.id),
   ]);
-  const values = eventToFormValues(event, categoryIds, timeZone);
+  const values = {
+    ...eventToFormValues(event, categoryIds, timeZone),
+    tags: tagRows.map((tag) => tag.name),
+  };
   const locked = fullEdit
     ? []
     : EVENT_FIELDS.filter((f) => {
@@ -74,6 +79,7 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
     categories,
     fullEdit,
     locked,
+    lockedTags: fullEdit ? [] : tagRows.map((tag) => tag.name),
     imagePreviewUrl: mediaUrl(event.imageMediaId),
     series: detail
       ? { id: detail.id, title: detail.displayTitle, count: detail.stats.count }
@@ -148,6 +154,14 @@ export async function action({ params, context, request }: Route.ActionArgs) {
   const parsed = parseEventForm(form, timeZone);
   if (!parsed.ok) return data({ errors: parsed.errors }, { status: 400 });
 
+  const mode = fullEdit ? "replace" : "add";
+  try {
+    await assertTagUpdate(db, { eventId: event.id, names: parsed.data.tags, mode });
+  } catch (error) {
+    if (error instanceof TagLimitError) return data({ errors: { tags: error.message } }, { status: 400 });
+    throw error;
+  }
+
   const image = await resolveEventImage(db, form, user.id, parsed.data);
   if (image.error) return data({ errors: { image: image.error } }, { status: 400 });
 
@@ -165,6 +179,17 @@ export async function action({ params, context, request }: Route.ActionArgs) {
       timeZone,
     });
   }
+  await saveEventTags(db, {
+    eventId: event.id,
+    names: parsed.data.tags,
+    userId: user.id,
+    mode,
+    contributionType: !fullEdit
+      ? "add_info"
+      : isAdmin(user) && event.createdById !== user.id
+        ? "moderate"
+        : "edit",
+  });
   throw redirect(`/events/${event.id}`);
 }
 
@@ -244,7 +269,7 @@ function SeriesLinkEditor({
 }
 
 export default function EditEvent({ loaderData, actionData }: Route.ComponentProps) {
-  const { event, values, categories, fullEdit, locked, imagePreviewUrl, series, canAttach, canDetach } = loaderData;
+  const { event, values, categories, fullEdit, locked, lockedTags, imagePreviewUrl, series, canAttach, canDetach } = loaderData;
   const navigation = useNavigation();
   const errors = (actionData && "errors" in actionData ? actionData.errors : {}) as Record<string, string>;
   const submitting = navigation.state === "submitting";
@@ -267,13 +292,14 @@ export default function EditEvent({ loaderData, actionData }: Route.ComponentPro
       {(series || canAttach || canDetach) && (
         <SeriesLinkEditor series={series} canAttach={canAttach} canDetach={canDetach} />
       )}
-      <Form method="post" encType="multipart/form-data" className="grid gap-8">
+      <Form method="post" encType="multipart/form-data" className="grid gap-8" key={event.id}>
         <FormError message={errors._form} />
         <EventForm
           categories={categories}
           values={values}
           errors={errors}
           locked={locked}
+          lockedTags={lockedTags}
           imagePreviewUrl={imagePreviewUrl}
           allowRemoveImage={fullEdit}
         />
