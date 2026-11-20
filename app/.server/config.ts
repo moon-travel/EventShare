@@ -4,6 +4,7 @@ type OptionalSecrets = {
   GROQ_API_KEY?: string;
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
+  RESEND_API_KEY?: string;
 };
 
 function list(value: string | undefined) {
@@ -26,7 +27,29 @@ export function getConfig() {
     ? (env.AI_PROVIDER as AiProviderName)
     : "none";
 
+  // Email sending degrades safely: "resend" without an API key resolves to
+  // "none", and verification turns itself off when no provider is usable, so
+  // a missing secret can never lock users out of the site.
+  const rawEmailProvider = env.EMAIL_PROVIDER as string | undefined;
+  const emailProvider =
+    rawEmailProvider === "resend" && optional.RESEND_API_KEY
+      ? ("resend" as const)
+      : rawEmailProvider === "console"
+        ? ("console" as const)
+        : ("none" as const);
+  const rawVerification = env.EMAIL_VERIFICATION as string | undefined;
+  const emailVerification =
+    (rawVerification === "on" || rawVerification === "required") &&
+    emailProvider !== "none"
+      ? rawVerification
+      : ("off" as const);
+
   return {
+    emailProvider,
+    emailFrom: (env.EMAIL_FROM as string | undefined) || "Event Share <no-reply@localhost>",
+    resendApiKey: optional.RESEND_API_KEY,
+    /** "off" = disabled / "on" = send + record / "required" = block unverified logins */
+    emailVerification,
     baseUrl: env.BETTER_AUTH_URL,
     timeZone: env.APP_TIMEZONE || "Asia/Tokyo",
     signupMode: (env.SIGNUP_MODE as string) === "domain" ? ("domain" as const) : ("open" as const),

@@ -8,3 +8,7 @@ BETTER_AUTH_SECRET=replace-with-a-random-32-plus-character-secret
 # Only needed when AI_PROVIDER=openai (OpenAI-compatible Chat Completions API).
 # OPENAI_API_KEY=
 # OPENAI_BASE_URL=https://api.openai.com/v1
+
+# Only needed when EMAIL_PROVIDER=resend (https://resend.com/api-keys).
+# In local dev EMAIL_PROVIDER=console logs emails instead of sending them.
+# RESEND_API_KEY=

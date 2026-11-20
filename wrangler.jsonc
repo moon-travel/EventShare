@@ -31,6 +31,13 @@
 		// "open" = anyone can sign up / "domain" = only SCHOOL_EMAIL_DOMAINS
 		"SIGNUP_MODE": "domain",
 		"SCHOOL_EMAIL_DOMAINS": "gse.okayama-c.ed.jp",
+		// "off" = no verification email / "on" = send + record /
+		// "required" = unverified users cannot log in.
+		// Automatically falls back to "off" when no email provider is usable.
+		"EMAIL_VERIFICATION": "on",
+		// "console" = log instead of sending (dev) / "resend" (needs RESEND_API_KEY)
+		"EMAIL_PROVIDER": "console",
+		"EMAIL_FROM": "Event Share <no-reply@localhost>",
 		// "groq" | "workers-ai" | "openai" | "none" (rule-based only)
 		"AI_PROVIDER": "groq",
 		"AI_MODEL": "qwen/qwen3.8-27b"
@@ -67,6 +74,13 @@
 				"BETTER_AUTH_URL": "https://event-share.eventshare.workers.dev",
 				"SIGNUP_MODE": "domain",
 				"SCHOOL_EMAIL_DOMAINS": "gse.okayama-c.ed.jp",
+				// Takes effect once the RESEND_API_KEY secret is set
+				// (`wrangler secret put RESEND_API_KEY --env production`).
+				// Until then verification stays off automatically.
+				"EMAIL_VERIFICATION": "on",
+				"EMAIL_PROVIDER": "resend",
+				// Must be a sender address verified in Resend.
+				"EMAIL_FROM": "Event Share <no-reply@example.com>",
 				"AI_PROVIDER": "groq",
 				"AI_MODEL": "qwen/qwen3.8-27b"
 			},
@@ -102,6 +116,9 @@
 					"BETTER_AUTH_URL": "https://event-share.eventshare.workers.dev",
 					"SIGNUP_MODE": "domain",
 					"SCHOOL_EMAIL_DOMAINS": "gse.okayama-c.ed.jp",
+					"EMAIL_VERIFICATION": "on",
+					"EMAIL_PROVIDER": "console",
+					"EMAIL_FROM": "Event Share <no-reply@localhost>",
 					"AI_PROVIDER": "groq",
 					"AI_MODEL": "qwen/qwen3.8-27b"
 				},
