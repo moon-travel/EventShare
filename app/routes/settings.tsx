@@ -1,10 +1,16 @@
 import { APIError } from "better-auth/api";
-import { PartyPopper } from "lucide-react";
+import { CalendarPlus, Copy, PartyPopper } from "lucide-react";
 import { useEffect } from "react";
 import { data, Form, useActionData, useNavigation, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { getAuth } from "~/.server/auth";
+import { getConfig } from "~/.server/config";
 import { createDb } from "~/.server/db";
+import {
+  deleteCalendarFeed,
+  getCalendarFeed,
+  rotateCalendarFeed,
+} from "~/.server/services/calendar-feed";
 import { getActiveCategories } from "~/.server/services/events";
 import {
   getNotificationSettings,
@@ -33,14 +39,20 @@ export const meta = () => [{ title: "設定 | Event Share" }];
 export async function loader({ context, request }: Route.LoaderArgs) {
   const sessionUser = requireUser(context, request);
   const db = createDb();
-  const [profile, interests, categories, notifications] = await Promise.all([
-    getUserById(db, sessionUser.id),
-    getInterests(db, sessionUser.id),
-    getActiveCategories(db),
-    getNotificationSettings(db, sessionUser.id),
-  ]);
+  const [profile, interests, categories, notifications, calendarFeed] =
+    await Promise.all([
+      getUserById(db, sessionUser.id),
+      getInterests(db, sessionUser.id),
+      getActiveCategories(db),
+      getNotificationSettings(db, sessionUser.id),
+      getCalendarFeed(db, sessionUser.id),
+    ]);
   if (!profile) throw data("Not found", { status: 404 });
+  const origin = new URL(getConfig().baseUrl || request.url).origin;
   return {
+    calendarFeedUrl: calendarFeed
+      ? `${origin}/calendar/feed/${calendarFeed.token}`
+      : null,
     profile: {
       name: profile.name,
       email: profile.email,
@@ -86,6 +98,25 @@ export async function action({ request, context }: Route.ActionArgs) {
     });
     return { section: intent, ok: true, message: "通知設定を保存しました" } satisfies ActionResult;
   }
+  if (intent === "calendar_create" || intent === "calendar_rotate") {
+    await rotateCalendarFeed(db, user.id);
+    return {
+      section: "calendar",
+      ok: true,
+      message:
+        intent === "calendar_create"
+          ? "カレンダー購読URLを発行しました"
+          : "購読URLを再発行しました（以前のURLは使えなくなりました）",
+    } satisfies ActionResult;
+  }
+  if (intent === "calendar_disable") {
+    await deleteCalendarFeed(db, user.id);
+    return {
+      section: "calendar",
+      ok: true,
+      message: "カレンダー連携を無効にしました",
+    } satisfies ActionResult;
+  }
   if (intent === "password") {
     const parsed = passwordSchema.safeParse(formDataToObject(form));
     if (!parsed.success) {
@@ -127,8 +158,24 @@ function SaveButton({ intent }: { intent: string }) {
   );
 }
 
+function CopyUrlButton({ url }: { url: string }) {
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("URLをコピーしました");
+    } catch {
+      toast.error("URLをコピーできませんでした");
+    }
+  }
+  return (
+    <Button type="button" variant="outline" onClick={copy} aria-label="URLをコピー">
+      <Copy /> コピー
+    </Button>
+  );
+}
+
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { profile, interests, categories, notifications } = loaderData;
+  const { profile, interests, categories, notifications, calendarFeedUrl } = loaderData;
   const actionData = useActionData<ActionResult>();
   const [params] = useSearchParams();
   const errorsFor = (section: string) =>
@@ -261,6 +308,81 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
                 <SaveButton intent="notifications" />
               </div>
             </Form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>カレンダー連携</CardTitle>
+            <CardDescription>
+              お気に入り・参加予定のイベントと応募締切を、Google カレンダーや iPhone
+              のカレンダーに「購読」として表示できます。イベントの追加・変更は自動で反映されます。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {calendarFeedUrl ? (
+              <div className="grid gap-4">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    readOnly
+                    value={calendarFeedUrl}
+                    aria-label="カレンダー購読URL"
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="font-mono text-xs"
+                  />
+                  <CopyUrlButton url={calendarFeedUrl} />
+                </div>
+                <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">使い方</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    <li>Google カレンダー: 「他のカレンダー」→「URL で追加」に貼り付け</li>
+                    <li>iPhone / iPad: 設定 →「カレンダー」→「照会するカレンダーを追加」に貼り付け</li>
+                    <li>反映には最大1日ほどかかる場合があります（カレンダーアプリ側の更新間隔によります）</li>
+                  </ul>
+                  <p className="mt-2">
+                    このURLを知っている人は誰でもあなたのお気に入り・参加予定を見られます。他人と共有しないでください。
+                  </p>
+                </div>
+                <Form method="post" className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="submit"
+                    name="intent"
+                    value="calendar_rotate"
+                    variant="outline"
+                    onClick={(e) => {
+                      if (!confirm("URLを再発行しますか？ 登録済みのカレンダーには再設定が必要になります。"))
+                        e.preventDefault();
+                    }}
+                  >
+                    URLを再発行
+                  </Button>
+                  <Button
+                    type="submit"
+                    name="intent"
+                    value="calendar_disable"
+                    variant="outline"
+                    className="text-destructive"
+                    onClick={(e) => {
+                      if (!confirm("カレンダー連携を無効にしますか？ 現在のURLは使えなくなります。"))
+                        e.preventDefault();
+                    }}
+                  >
+                    無効にする
+                  </Button>
+                </Form>
+              </div>
+            ) : (
+              <Form method="post" className="grid gap-3">
+                <p className="text-sm text-muted-foreground">
+                  専用の購読URLを発行すると、カレンダーアプリに登録できます。URLはあなた専用です（いつでも再発行・無効化できます）。
+                </p>
+                <div>
+                  <Button type="submit" name="intent" value="calendar_create">
+                    <CalendarPlus /> 購読URLを発行
+                  </Button>
+                </div>
+              </Form>
+            )}
           </CardContent>
         </Card>
 
