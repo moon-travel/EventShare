@@ -32,6 +32,7 @@ const SETTING_COLUMN = {
   event_soon: notificationSettings.eventSoon,
   comment: notificationSettings.comment,
   reaction: notificationSettings.reaction,
+  saved_search: notificationSettings.savedSearch,
 } as const;
 
 /** Removes users who switched this notification type off. */
@@ -253,6 +254,7 @@ export async function getNotificationSettings(db: Database, userId: string) {
     eventSoon: row?.eventSoon ?? true,
     comment: row?.comment ?? true,
     reaction: row?.reaction ?? true,
+    savedSearch: row?.savedSearch ?? true,
   };
 }
 
