@@ -43,6 +43,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     params,
     categories,
     loggedIn: !!viewer,
+    canSaveMore: saved.length < MAX_SAVED_SEARCHES,
     savedSearches: saved.map((s) => ({
       id: s.id,
       name: s.name,
@@ -255,9 +256,11 @@ function SavedSearchChip({ item }: { item: SavedSearchItem }) {
 function SavedSearchesPanel({
   items,
   canSave,
+  canSaveMore,
 }: {
   items: SavedSearchItem[];
   canSave: boolean;
+  canSaveMore: boolean;
 }) {
   const location = useLocation();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -271,7 +274,7 @@ function SavedSearchesPanel({
         {items.map((s) => (
           <SavedSearchChip key={s.id} item={s} />
         ))}
-        {canSave && items.length < MAX_SAVED_SEARCHES && (
+        {canSave && canSaveMore && (
           <Button
             type="button"
             variant="outline"
@@ -299,8 +302,17 @@ function SavedSearchesPanel({
 }
 
 export default function Events({ loaderData }: Route.ComponentProps) {
-  const { items, total, page, pageCount, params, categories, loggedIn, savedSearches } =
-    loaderData;
+  const {
+    items,
+    total,
+    page,
+    pageCount,
+    params,
+    categories,
+    loggedIn,
+    canSaveMore,
+    savedSearches,
+  } = loaderData;
   const navigation = useNavigation();
   const submit = useSubmit();
   const [showFilters, setShowFilters] = useState(false);
@@ -325,6 +337,7 @@ export default function Events({ loaderData }: Route.ComponentProps) {
         <SavedSearchesPanel
           items={savedSearches}
           canSave={!!params.q || activeFilterCount(params) > 0}
+          canSaveMore={canSaveMore}
         />
       )}
 
