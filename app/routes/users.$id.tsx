@@ -3,6 +3,7 @@ import { data, Link } from "react-router";
 import { createDb } from "~/.server/db";
 import { listActivities } from "~/.server/services/activities";
 import { toEventCards } from "~/.server/services/events";
+import { getUserStats } from "~/.server/services/stats";
 import {
   canViewProfile,
   eventsParticipatedBy,
@@ -15,6 +16,7 @@ import { ActivityCard } from "~/components/activities/activity-card";
 import { EmptyState } from "~/components/empty-state";
 import { EventGrid } from "~/components/events/event-card";
 import { PageContainer } from "~/components/page-header";
+import { ProfileBadges } from "~/components/profile-badges";
 import { ProfileHeader } from "~/components/profile-header";
 import { ReportDialog } from "~/components/report-dialog";
 import { Button } from "~/components/ui/button";
@@ -40,15 +42,17 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   }
 
   const now = new Date();
-  const [interests, posted, participated, activities] = await Promise.all([
+  const [interests, posted, participated, activities, stats] = await Promise.all([
     getInterests(db, target.id),
     eventsPostedBy(db, target.id, 24).then((rows) => toEventCards(db, rows, now)),
     eventsParticipatedBy(db, target.id, 24).then((rows) => toEventCards(db, rows, now)),
     listActivities(db, { userId: target.id, limit: 24 }),
+    getUserStats(db, target.id),
   ]);
   return {
     visible: true as const,
     isSelf: viewer?.id === target.id,
+    stats,
     profile: {
       id: target.id,
       name: target.name,
@@ -80,7 +84,7 @@ export default function UserProfile({ loaderData }: Route.ComponentProps) {
       </PageContainer>
     );
   }
-  const { profile, interests, posted, participated, activities, isSelf } = loaderData;
+  const { profile, interests, posted, participated, activities, isSelf, stats } = loaderData;
   return (
     <PageContainer className="max-w-5xl">
       <ProfileHeader
@@ -98,6 +102,9 @@ export default function UserProfile({ loaderData }: Route.ComponentProps) {
           )
         }
       />
+      <div className="mt-4">
+        <ProfileBadges counts={stats} categories={stats.categories} showGoals={isSelf} />
+      </div>
       <Tabs defaultValue="posted" className="mt-8">
         <TabsList>
           <TabsTrigger value="posted">投稿したイベント（{posted.length}）</TabsTrigger>

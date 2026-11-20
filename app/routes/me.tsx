@@ -5,6 +5,7 @@ import { createDb } from "~/.server/db";
 import { eventBookmarks, events } from "~/.server/db/schema";
 import { listActivities } from "~/.server/services/activities";
 import { toEventCards } from "~/.server/services/events";
+import { getUserStats } from "~/.server/services/stats";
 import {
   contributionsBy,
   eventsParticipatedBy,
@@ -17,6 +18,7 @@ import { ActivityCard } from "~/components/activities/activity-card";
 import { EmptyState } from "~/components/empty-state";
 import { EventGrid } from "~/components/events/event-card";
 import { PageContainer } from "~/components/page-header";
+import { ProfileBadges } from "~/components/profile-badges";
 import { ProfileHeader } from "~/components/profile-header";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
@@ -40,7 +42,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   const db = createDb();
   const now = new Date();
   const me = (await getUserById(db, sessionUser.id))!;
-  const [interests, bookmarks, posted, participated, activities, contributions] = await Promise.all([
+  const [interests, bookmarks, posted, participated, activities, contributions, stats] = await Promise.all([
     getInterests(db, me.id),
     db
       .select({ event: events })
@@ -54,10 +56,12 @@ export async function loader({ context, request }: Route.LoaderArgs) {
     eventsParticipatedBy(db, me.id).then((rows) => toEventCards(db, rows, now)),
     listActivities(db, { userId: me.id, limit: 50 }),
     contributionsBy(db, me.id),
+    getUserStats(db, me.id),
   ]);
   return {
     me: { id: me.id, name: me.name, grade: me.grade, bio: me.bio, visibility: me.profileVisibility },
     interests: interests.map((i) => i.label),
+    stats,
     bookmarks,
     posted,
     participated,
@@ -67,7 +71,7 @@ export async function loader({ context, request }: Route.LoaderArgs) {
 }
 
 export default function MyPage({ loaderData }: Route.ComponentProps) {
-  const { me, interests, bookmarks, posted, participated, activities, contributions } = loaderData;
+  const { me, interests, stats, bookmarks, posted, participated, activities, contributions } = loaderData;
   const tz = useTimeZone();
   return (
     <PageContainer className="max-w-5xl">
@@ -90,6 +94,10 @@ export default function MyPage({ loaderData }: Route.ComponentProps) {
         }
       />
       <p className="mt-2 px-1 text-xs text-muted-foreground">プロフィールの公開範囲: {VISIBILITY_LABEL[me.visibility]}</p>
+
+      <div className="mt-4">
+        <ProfileBadges counts={stats} categories={stats.categories} showGoals />
+      </div>
 
       <Tabs defaultValue="bookmarks" className="mt-6">
         <TabsList className="flex h-auto w-full flex-wrap justify-start">
