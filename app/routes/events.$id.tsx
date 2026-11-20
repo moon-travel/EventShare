@@ -17,7 +17,9 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { data, Link, redirect, useFetcher } from "react-router";
+import { getConfig } from "~/.server/config";
 import { createDb } from "~/.server/db";
+import { findRelatedEvents } from "~/.server/related/find";
 import { listActivities } from "~/.server/services/activities";
 import { getEventExtras } from "~/.server/services/event-detail";
 import { getEvent, mediaUrl } from "~/.server/services/events";
@@ -39,7 +41,7 @@ import { getRequestInfo, getUser, isAdmin, requireUser } from "~/.server/session
 import { commentSchema } from "~/.server/validation/interaction";
 import { EVENT_FIELD_LABEL } from "~/.server/validation/event";
 import { ActivityCard } from "~/components/activities/activity-card";
-import { DeadlineText, placeLabel } from "~/components/events/event-card";
+import { DeadlineText, EventGrid, placeLabel } from "~/components/events/event-card";
 import { PhaseBadge } from "~/components/events/phase-badge";
 import { ExternalLink, Linkified } from "~/components/external-link";
 import { PageContainer } from "~/components/page-header";
@@ -80,15 +82,17 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     throw data("イベントが見つかりません", { status: 404 });
   }
 
-  const [extras, comments, viewerState, activities, creator] = await Promise.all([
-    getEventExtras(db, event.id),
-    listComments(db, event.id),
-    getViewerState(db, viewer?.id, event.id),
-    listActivities(db, { eventId: event.id, limit: 6 }),
-    event.createdById ? getUserById(db, event.createdById) : null,
-  ]);
-
   const now = new Date();
+  const [extras, comments, viewerState, activities, creator, relatedEvents] =
+    await Promise.all([
+      getEventExtras(db, event.id),
+      listComments(db, event.id),
+      getViewerState(db, viewer?.id, event.id),
+      listActivities(db, { eventId: event.id, limit: 6 }),
+      event.createdById ? getUserById(db, event.createdById) : null,
+      findRelatedEvents(db, event, now, getConfig().timeZone),
+    ]);
+
   return {
     event: { ...event, imageUrl: mediaUrl(event.imageMediaId) },
     phase: getEventPhase(event, now),
@@ -97,6 +101,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
     comments,
     viewerState,
     activities,
+    relatedEvents,
     canEdit: owner || admin,
     fieldLabels: EVENT_FIELD_LABEL,
   };
@@ -379,6 +384,7 @@ export default function EventDetail({ loaderData }: Route.ComponentProps) {
     comments,
     viewerState,
     activities,
+    relatedEvents,
     canEdit,
     fieldLabels,
   } = loaderData;
@@ -663,6 +669,34 @@ export default function EventDetail({ loaderData }: Route.ComponentProps) {
           )}
         </aside>
       </div>
+
+      {relatedEvents.series.length > 0 && (
+        <section aria-labelledby="series-events" className="mt-12">
+          <h2 id="series-events" className="text-lg font-bold">
+            このイベントの別の開催回
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            名前がよく似たイベントです。過去の開催回や次回の募集が見つかります。
+          </p>
+          <div className="mt-4">
+            <EventGrid events={relatedEvents.series} />
+          </div>
+        </section>
+      )}
+
+      {relatedEvents.related.length > 0 && (
+        <section aria-labelledby="related-events" className="mt-12">
+          <h2 id="related-events" className="text-lg font-bold">
+            似ているイベント
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            同じ分野・主催者などから選んだ、興味がありそうなイベントです。
+          </p>
+          <div className="mt-4">
+            <EventGrid events={relatedEvents.related} />
+          </div>
+        </section>
+      )}
     </PageContainer>
   );
 }
