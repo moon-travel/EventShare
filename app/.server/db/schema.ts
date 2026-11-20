@@ -456,6 +456,7 @@ export const NOTIFICATION_TYPES = [
   "event_soon",
   "comment",
   "reaction",
+  "saved_search",
   "system",
 ] as const;
 
@@ -495,8 +496,39 @@ export const notificationSettings = sqliteTable("notification_settings", {
   eventSoon: integer("event_soon", { mode: "boolean" }).default(true).notNull(),
   comment: integer("comment", { mode: "boolean" }).default(true).notNull(),
   reaction: integer("reaction", { mode: "boolean" }).default(true).notNull(),
+  savedSearch: integer("saved_search", { mode: "boolean" })
+    .default(true)
+    .notNull(),
   updatedAt: updatedAt(),
 });
+
+// ---------------------------------------------------------------------------
+// Saved searches
+// ---------------------------------------------------------------------------
+
+/**
+ * A saved set of event-search filters. When `notify` is on, the daily cron
+ * job checks for newly posted events matching the stored query and sends one
+ * site notification per day per saved search.
+ */
+export const savedSearches = sqliteTable(
+  "saved_searches",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Non-default `EventSearchParams` fields (validated on read). */
+    query: text("query", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    notify: integer("notify", { mode: "boolean" }).default(true).notNull(),
+    lastNotifiedAt: integer("last_notified_at", { mode: "timestamp_ms" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("saved_searches_user_idx").on(t.userId, t.createdAt)],
+);
 
 // ---------------------------------------------------------------------------
 // Interests & AI chat

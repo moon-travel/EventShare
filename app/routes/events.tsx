@@ -1,9 +1,19 @@
-import { Plus, SearchX, SlidersHorizontal, X } from "lucide-react";
+import { Bell, BellOff, BookmarkPlus, Plus, SearchX, SlidersHorizontal, X } from "lucide-react";
 import { useState } from "react";
-import { Form, Link, useNavigation, useSubmit } from "react-router";
+import { data, Form, Link, useFetcher, useLocation, useNavigation, useSubmit } from "react-router";
 import { getConfig } from "~/.server/config";
 import { createDb } from "~/.server/db";
 import { getActiveCategories, parseSearchParams, searchEvents } from "~/.server/services/events";
+import {
+  createSavedSearch,
+  deleteSavedSearch,
+  listSavedSearches,
+  MAX_SAVED_SEARCHES,
+  setSavedSearchNotify,
+  storedToSearchString,
+} from "~/.server/services/saved-searches";
+import { enforceRateLimit } from "~/.server/rate-limit";
+import { getUser, requireUser } from "~/.server/session";
 import { EmptyState } from "~/components/empty-state";
 import { EventGrid } from "~/components/events/event-card";
 import { PageContainer, PageHeader } from "~/components/page-header";
@@ -19,14 +29,66 @@ import type { Route } from "./+types/events";
 
 export const meta = () => [{ title: "イベントを探す | Event Share" }];
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const db = createDb();
+  const viewer = getUser(context);
   const params = parseSearchParams(new URL(request.url).searchParams);
-  const [result, categories] = await Promise.all([
+  const [result, categories, saved] = await Promise.all([
     searchEvents(db, params, new Date(), getConfig().timeZone),
     getActiveCategories(db),
+    viewer ? listSavedSearches(db, viewer.id) : [],
   ]);
-  return { ...result, params, categories };
+  return {
+    ...result,
+    params,
+    categories,
+    loggedIn: !!viewer,
+    savedSearches: saved.map((s) => ({
+      id: s.id,
+      name: s.name,
+      notify: s.notify,
+      search: storedToSearchString(s.query),
+    })),
+  };
+}
+
+export async function action({ request, context }: Route.ActionArgs) {
+  const user = requireUser(context, request);
+  await enforceRateLimit("write", user.id);
+  const db = createDb();
+  const form = await request.formData();
+  const intent = String(form.get("intent"));
+
+  if (intent === "save_search") {
+    const params = parseSearchParams(
+      new URLSearchParams(String(form.get("query") ?? "")),
+    );
+    const name = form.get("name");
+    const result = await createSavedSearch(
+      db,
+      user.id,
+      typeof name === "string" ? name : null,
+      params,
+    );
+    if (!result.ok) {
+      return data({ ok: false as const, error: result.error }, { status: 400 });
+    }
+    return { ok: true as const };
+  }
+  if (intent === "delete_search") {
+    await deleteSavedSearch(db, user.id, String(form.get("id")));
+    return { ok: true as const };
+  }
+  if (intent === "toggle_search_notify") {
+    await setSavedSearchNotify(
+      db,
+      user.id,
+      String(form.get("id")),
+      form.get("notify") === "1",
+    );
+    return { ok: true as const };
+  }
+  throw data("不正なリクエストです", { status: 400 });
 }
 
 type Params = Route.ComponentProps["loaderData"]["params"];
@@ -139,8 +201,106 @@ function Filters({
   );
 }
 
+type SavedSearchItem = Route.ComponentProps["loaderData"]["savedSearches"][number];
+
+function SavedSearchChip({ item }: { item: SavedSearchItem }) {
+  const fetcher = useFetcher();
+  if (fetcher.formData?.get("intent") === "delete_search") return null;
+  const notifyOn = fetcher.formData
+    ? fetcher.formData.get("notify") === "1"
+    : item.notify;
+  return (
+    <span className="inline-flex items-center gap-0.5 rounded-full border bg-card py-0.5 pr-1 pl-3 text-sm">
+      <Link to={`/events?${item.search}`} className="font-medium hover:underline">
+        {item.name}
+      </Link>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6"
+        title={notifyOn ? "新着通知をオフにする" : "新着通知をオンにする"}
+        aria-pressed={notifyOn}
+        onClick={() =>
+          fetcher.submit(
+            { intent: "toggle_search_notify", id: item.id, notify: notifyOn ? "0" : "1" },
+            { method: "post" },
+          )
+        }
+      >
+        {notifyOn ? (
+          <Bell className="size-3.5" />
+        ) : (
+          <BellOff className="size-3.5 text-muted-foreground" />
+        )}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6"
+        aria-label={`「${item.name}」を削除`}
+        onClick={() => {
+          if (confirm(`保存した検索「${item.name}」を削除しますか？`)) {
+            fetcher.submit({ intent: "delete_search", id: item.id }, { method: "post" });
+          }
+        }}
+      >
+        <X className="size-3.5" />
+      </Button>
+    </span>
+  );
+}
+
+function SavedSearchesPanel({
+  items,
+  canSave,
+}: {
+  items: SavedSearchItem[];
+  canSave: boolean;
+}) {
+  const location = useLocation();
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  if (items.length === 0 && !canSave) return null;
+  return (
+    <div className="mb-6 rounded-xl border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
+          <BookmarkPlus className="size-4" aria-hidden /> 保存した検索
+        </span>
+        {items.map((s) => (
+          <SavedSearchChip key={s.id} item={s} />
+        ))}
+        {canSave && items.length < MAX_SAVED_SEARCHES && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={fetcher.state !== "idle"}
+            onClick={() =>
+              fetcher.submit(
+                { intent: "save_search", query: location.search.replace(/^\?/, "") },
+                { method: "post" },
+              )
+            }
+          >
+            <Plus /> この条件を保存
+          </Button>
+        )}
+      </div>
+      {fetcher.data && !fetcher.data.ok && fetcher.data.error && (
+        <p className="mt-2 text-xs text-destructive">{fetcher.data.error}</p>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">
+        保存した条件に合う新着イベントは、1日1回まとめて通知でお知らせします（ベルのアイコンでオン・オフできます）。
+      </p>
+    </div>
+  );
+}
+
 export default function Events({ loaderData }: Route.ComponentProps) {
-  const { items, total, page, pageCount, params, categories } = loaderData;
+  const { items, total, page, pageCount, params, categories, loggedIn, savedSearches } =
+    loaderData;
   const navigation = useNavigation();
   const submit = useSubmit();
   const [showFilters, setShowFilters] = useState(false);
@@ -160,6 +320,13 @@ export default function Events({ loaderData }: Route.ComponentProps) {
           </Button>
         }
       />
+
+      {loggedIn && (
+        <SavedSearchesPanel
+          items={savedSearches}
+          canSave={!!params.q || activeFilterCount(params) > 0}
+        />
+      )}
 
       <Form method="get" id="search" role="search" className="grid gap-6 lg:grid-cols-[280px_1fr]">
         <div className="lg:col-start-2">

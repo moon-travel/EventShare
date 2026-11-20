@@ -40,6 +40,7 @@ export const NOTIFICATION_TYPE_LABEL = {
   event_soon: "開催日が近い",
   comment: "コメント",
   reaction: "リアクション",
+  saved_search: "保存した検索",
   system: "お知らせ",
 } as const;
 
