@@ -499,6 +499,23 @@ export const notificationSettings = sqliteTable("notification_settings", {
 });
 
 // ---------------------------------------------------------------------------
+// Calendar subscription feeds
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-user secret token for the ICS subscription feed (`/calendar/feed/:token`).
+ * The URL is the only credential, so the token is a 256-bit random value and
+ * can be rotated (replaced) or deleted by the user at any time.
+ */
+export const calendarFeeds = sqliteTable("calendar_feeds", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  createdAt: createdAt(),
+});
+
+// ---------------------------------------------------------------------------
 // Interests & AI chat
 // ---------------------------------------------------------------------------
 

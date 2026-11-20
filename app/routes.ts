@@ -16,6 +16,7 @@ export default [
   route("events/:id/edit", "routes/events.$id.edit.tsx"),
   route("events/:id/calendar.ics", "routes/events.$id.ics.ts"),
   route("calendar", "routes/calendar.tsx"),
+  route("calendar/feed/:token", "routes/calendar-feed.$token.ts"),
   route("chat", "routes/chat.tsx"),
 
   // Activity reports
