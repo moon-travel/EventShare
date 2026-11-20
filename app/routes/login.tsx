@@ -42,10 +42,13 @@ export async function action({ request, context }: Route.ActionArgs) {
     });
     return redirect(safeRedirectPath(redirectTo), { headers });
   } catch (error) {
-    const message =
-      error instanceof APIError && error.status === "FORBIDDEN"
-        ? (error.body?.message ?? "このアカウントは利用できません。")
-        : "メールアドレスまたはパスワードが正しくありません。";
+    let message = "メールアドレスまたはパスワードが正しくありません。";
+    if (error instanceof APIError && error.status === "FORBIDDEN") {
+      message =
+        error.body?.code === "EMAIL_NOT_VERIFIED"
+          ? "メールアドレスの確認が完了していません。確認メールを再送しましたので、メール内のリンクを開いてから再度ログインしてください。"
+          : (error.body?.message ?? "このアカウントは利用できません。");
+    }
     return data({ errors: {}, formError: message }, { status: 400 });
   }
 }

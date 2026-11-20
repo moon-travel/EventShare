@@ -3,9 +3,11 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { admin } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import { getConfig } from "./config";
 import { createDb, schema } from "./db";
-import { canSignUp } from "./school";
+import { buildVerificationEmail, sendEmail } from "./email";
+import { canSignUp, isSchoolEmail } from "./school";
 
 function createAuth() {
   const config = getConfig();
@@ -24,7 +26,35 @@ function createAuth() {
       minPasswordLength: 8,
       maxPasswordLength: 128,
       autoSignIn: true,
+      requireEmailVerification: config.emailVerification === "required",
     },
+    ...(config.emailVerification !== "off"
+      ? {
+          emailVerification: {
+            sendOnSignUp: true,
+            /** Re-send automatically when an unverified user tries to log in. */
+            sendOnSignIn: config.emailVerification === "required",
+            autoSignInAfterVerification: true,
+            expiresIn: 60 * 60 * 24,
+            sendVerificationEmail: async ({ user, url }) => {
+              await sendEmail(
+                config,
+                { to: user.email, ...buildVerificationEmail({ name: user.name, url }) },
+              );
+            },
+            afterEmailVerification: async (verifiedUser) => {
+              // Email ownership proven: mark school affiliation as confirmed
+              // when the address belongs to the school domain.
+              if (isSchoolEmail(verifiedUser.email, config.schoolEmailDomains)) {
+                await createDb()
+                  .update(schema.user)
+                  .set({ schoolVerifiedAt: new Date(), updatedAt: new Date() })
+                  .where(eq(schema.user.id, verifiedUser.id));
+              }
+            },
+          },
+        }
+      : {}),
     session: {
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,

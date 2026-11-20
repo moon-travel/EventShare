@@ -1,9 +1,10 @@
 import { APIError } from "better-auth/api";
-import { PartyPopper } from "lucide-react";
+import { BadgeCheck, MailWarning, PartyPopper } from "lucide-react";
 import { useEffect } from "react";
 import { data, Form, useActionData, useNavigation, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { getAuth } from "~/.server/auth";
+import { getConfig } from "~/.server/config";
 import { createDb } from "~/.server/db";
 import { getActiveCategories } from "~/.server/services/events";
 import {
@@ -41,6 +42,11 @@ export async function loader({ context, request }: Route.LoaderArgs) {
   ]);
   if (!profile) throw data("Not found", { status: 404 });
   return {
+    emailStatus: {
+      mode: getConfig().emailVerification,
+      verified: profile.emailVerified,
+      schoolVerified: !!profile.schoolVerifiedAt,
+    },
     profile: {
       name: profile.name,
       email: profile.email,
@@ -86,6 +92,29 @@ export async function action({ request, context }: Route.ActionArgs) {
     });
     return { section: intent, ok: true, message: "通知設定を保存しました" } satisfies ActionResult;
   }
+  if (intent === "send_verification") {
+    await enforceRateLimit("auth", user.id);
+    try {
+      await getAuth().api.sendVerificationEmail({
+        body: { email: user.email, callbackURL: "/settings" },
+        headers: request.headers,
+      });
+      return {
+        section: intent,
+        ok: true,
+        message: "確認メールを送信しました。受信トレイを確認してください",
+      } satisfies ActionResult;
+    } catch {
+      return data<ActionResult>(
+        {
+          section: intent,
+          ok: false,
+          errors: { email: "確認メールを送信できませんでした。時間をおいて再度お試しください" },
+        },
+        { status: 400 },
+      );
+    }
+  }
   if (intent === "password") {
     const parsed = passwordSchema.safeParse(formDataToObject(form));
     if (!parsed.success) {
@@ -128,7 +157,7 @@ function SaveButton({ intent }: { intent: string }) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { profile, interests, categories, notifications } = loaderData;
+  const { profile, interests, categories, notifications, emailStatus } = loaderData;
   const actionData = useActionData<ActionResult>();
   const [params] = useSearchParams();
   const errorsFor = (section: string) =>
@@ -270,6 +299,34 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
             <CardDescription>ログイン用メールアドレス: {profile.email}</CardDescription>
           </CardHeader>
           <CardContent>
+            {emailStatus.mode !== "off" && (
+              <div className="mb-6 rounded-lg border p-3">
+                {emailStatus.verified ? (
+                  <p className="flex items-center gap-2 text-sm">
+                    <BadgeCheck className="size-4 shrink-0 text-emerald-600" aria-hidden />
+                    メールアドレスは確認済みです
+                    {emailStatus.schoolVerified && (
+                      <span className="text-muted-foreground">（学校所属の確認済み）</span>
+                    )}
+                  </p>
+                ) : (
+                  <div className="grid gap-2">
+                    <p className="flex items-center gap-2 text-sm">
+                      <MailWarning className="size-4 shrink-0 text-amber-600" aria-hidden />
+                      メールアドレスはまだ確認されていません。確認メールのリンクを開いてください。
+                    </p>
+                    <Form method="post">
+                      <Button type="submit" name="intent" value="send_verification" variant="outline" size="sm">
+                        確認メールを再送
+                      </Button>
+                    </Form>
+                    {errorsFor("send_verification").email && (
+                      <p className="text-xs text-destructive">{errorsFor("send_verification").email}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <Form method="post" className="grid gap-4">
               <FormField id="currentPassword" label="現在のパスワード" error={errorsFor("password").currentPassword}>
                 <Input id="currentPassword" name="currentPassword" type="password" autoComplete="current-password" />
